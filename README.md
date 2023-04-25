@@ -1,9 +1,5 @@
-YELLOWFARM
-##########
+Shodan Extractor
+================
 
-YELLOWFARM V9 is a data-line cellular program intended to exfiltrate concealed target intelligence. 
-Using it, the analyst can intercept foreigners' transactions with total freedom.
-
-----------------------
-
+Extracts and parses data into a better format for large scale analysis of large host set.
 
