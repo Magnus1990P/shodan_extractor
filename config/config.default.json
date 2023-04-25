@@ -1,0 +1,21 @@
+{
+    "global": {
+        "request_page_size":    100,
+        "request_max_retries":  3,
+        "request_timeout":      3
+    },
+
+    "logging": {
+        "log_file":         "./logs/cyber_farm-default.log",
+        "log_fstr_short":   "%(asctime)s %(levelname)-8s %(name)-15s %(message)s",
+        "log_fstr_std":     "%(asctime)s %(levelname)-8s [%(funcName)20s() - %(filename)15s - line %(lineno)4s ] %(message)s",
+        "log_date_formt":   "%Y%m%d-%H%M%S",
+        "log_level":        20
+    },
+
+    "ShodanExtractor": {
+        "skip_keys": ["hash", "ip", "screenshot", "asn", "_shodan", "cpe", "cpe23", "version", "tags", "info"],
+        "keys_str": ["os", "product", "ip_str", "org", "timestamp", "transport", "isp", "version", "devicetype"],
+        "keys_int": ["port"]
+    }
+}
