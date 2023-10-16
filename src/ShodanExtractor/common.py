@@ -1,50 +1,30 @@
 import logging
 import json
 import gzip
+import ipaddress
+import datetime
+
+from c99api import EndpointClient
+from typing import List, Dict, Optional
 from os.path import exists
-from typing import List, Dict
-from time import sleep
+
+from pydantic import BaseModel
 
 logger = logging.getLogger()
 
 
-def extract_common_keys(json_objects : List = []) -> List[str]:
-    common_keys = list(json_objects[0].keys())
-    for obj in json_objects[1:]:
-        remove_list = [key for key in common_keys if key not in obj.keys()]
-        for key in remove_list:
-            common_keys.pop(common_keys.index(key))
-    return common_keys
-
-
-def load_shodan_files(filenamse:List[str] = []):
-    hash_list = []
-    lines = []
-    for filename in filenamse:
-        if not exists(filename):
-            raise FileNotFoundError
-        
-        if filename.endswith(".json.gz"):
-            with gzip.open(filename, "rb") as archive:
-                logging.info(archive.filename)
-                lines.extend(archive.readlines())
-                    
-        else:
-            with open(filename, "rb") as raw_file:
-                logging.info(filename)
-                lines.extend(raw_file.readlines())
-        
-    data = []
-    for line in lines:
-        line = line.strip()
-        try:
-            json_obj = json.loads(line)
-            data.append(json_obj)
-        except:
-            logging.warning(f"Error in line of data: {line}")
-            continue
-    return data
-
+def enrich_object_c99(object, c99_key:str=""):
+    c99 = EndpointClient
+    c99.key = c99_key
+    ip = object["IPAddress"]
+    resp = c99.gethostname(ip)
+    if resp["success"] and ip != resp["hostname"] and resp["hostname"] not in object["hostname_list"]:
+        logging.info(f"gethostname: {resp['hostname']}")
+        object["hostname_list"].append(resp["hostname"])
+    resp = c99.ip2domains(ip)
+    if resp["success"] and resp["count"] >= 1:
+        logging.info(f"ip2domains: {resp['data']}")
+        object["domain_list"].extend([hname for hname in resp["data"] if hname not in object["domain_list"]])
 
 def merge_config(current_config: Dict[int, str] = {}, custom_config: Dict[int, str] = {}):
     for key, value in custom_config.items():
@@ -60,18 +40,13 @@ def merge_config(current_config: Dict[int, str] = {}, custom_config: Dict[int, s
     return current_config
 
 
-def load_config(default_config: str = "config.json", override_config: str = ""):
+def load_config(default_config: str = "config.default.json", override_config: str = ""):
     config_builder = {}
     if exists(default_config):
         with open(default_config, "r", encoding="utf-8") as config_file:
             config_builder = json.load(config_file)
     else:
         raise ValueError("config file not found")
-
-    if not override_config:
-        logger.info("No override file provided, testing default convention")
-        override_config = f"{default_config}.override"
-
     if exists(override_config):
         with open(override_config, "r", encoding="utf-8") as config_file:
             try:
@@ -79,28 +54,106 @@ def load_config(default_config: str = "config.json", override_config: str = ""):
                 config_builder = merge_config(current_config=config_builder, custom_config=configData)
             except Exception as e:
                 logger.error(f"Error adding override config\n{e}")
-
     return config_builder
 
 
-def get_request(url: str = "localhost", params: Dict = {}, headers: Dict = {}, timeout: int = 3, max_retries: int = 3):
-    for attempt in range(0, max_retries):
+def decode_shodan(obj:dict={}):
+    try:
+        parsed_object = {
+            "domain_list": obj["domains"] if "domains" in obj else [],
+            "hostname_list": [obj["_shodan"]["options"]["hostname"]] if "hostname" in obj["_shodan"]["options"] else [],
+            "cloud_provider": None,
+            "operating_system": obj["os"],
+            "product": obj["product"] if "product" in obj else "",
+            "IPAddress": ipaddress.ip_address(obj["ip_str"]),
+            "timestamp": datetime.datetime.fromisoformat(obj["timestamp"]),
+            "protocol": obj["transport"] if "transport" in obj else "",
+            "internet_service_provider": obj["isp"],
+            "version": obj["version"] if "version" in obj else "",
+            "organisation": obj["org"],
+            "country": obj["location"]["country_name"] if "country_name" in obj["location"] else "",
+            "city": obj["location"]["city"] if "city" in obj["location"] else "",
+            "port": obj["port"]
+        }
+        parsed_object["hostname_list"].extend([hname.strip() for hname in obj["hostnames"]])
+    except Exception as e:
+        logging.error(e)
+        return {}
+    try:
+        if "ssl" in obj and "cert" in obj["ssl"]:
+            cert = obj["ssl"]
+            #parsed_object["ssl_fingerprint"] = cert["cert"]["fingerprint"]["sha256"]
+            #parsed_object["ssl_serial"] = cert["cert"]["serial"]
+            parsed_object["ssl_SAN"] = [cert["cert"]["subject"]["CN"]] if "CN" in cert["cert"]["subject"]["CN"] else []
+            for alt in cert["cert"]["extensions"]:
+                if alt["name"]=="subjectAltName" and alt["data"]:
+                    i = 0
+                    while i < len(alt["data"]):
+                        if alt["data"][i] == "\\":
+                            i += 4
+                            continue
+                        next_slash = alt["data"][i:].find("\\")
+                        if next_slash >= 0:
+                            parsed_object["ssl_SAN"].append(alt["data"][i:i+next_slash])
+                            i += next_slash
+                        else:
+                            parsed_object["ssl_SAN"].append(alt["data"][i:])
+                            i = len(alt["data"])
+                        if parsed_object["ssl_SAN"][-1] == "0.":
+                            parsed_object["ssl_SAN"].pop()
+            parsed_object["ssl_SAN"] = list(set(parsed_object["ssl_SAN"]))
+            parsed_object["ssl_issuer"] = cert["cert"]["issuer"]["O"] if "O" in cert["cert"]["issuer"] else cert["cert"]["issuer"]["CN"]
+            #parsed_object["ssl_ja3"] = cert["ja3s"]
+            #parsed_object["ssl_jarm"] = cert["jarm"]
+            parsed_object["ssl_expiration"] = datetime.datetime.strptime(cert["cert"]["expires"], "%Y%m%d%H%M%SZ")
+        else:
+            #parsed_object["ssl_fingerprint"] = ""
+            #parsed_object["ssl_serial"] = -1
+            parsed_object["ssl_SAN"] = []
+            parsed_object["ssl_issuer"] = ""
+            #parsed_object["ssl_ja3"] = ""
+            #parsed_object["ssl_jarm"] = ""
+            parsed_object["ssl_expiration"] = datetime.datetime.fromordinal(1)
+    except Exception as e:
+        #parsed_object["ssl_fingerprint"] = ""
+        #parsed_object["ssl_serial"] = -1
+        parsed_object["ssl_SAN"] = []
+        parsed_object["ssl_issuer"] = ""
+        #parsed_object["ssl_ja3"] = ""
+        #parsed_object["ssl_jarm"] = ""
+        parsed_object["ssl_expiration"] = datetime.datetime.fromordinal(1)
+        logging.error(e)
+    return parsed_object
+
+
+def load_shodan_files(filename:str="", config:Dict={}):
+    if not exists(filename):
+        logging.error(f"File not found: {filename}")
+        raise FileNotFoundError
+    logging.info(f"Loading file: {filename}")
+    if filename.endswith(".json.gz"):
+        with gzip.open(filename, "rb") as archive:
+            lines = archive.readlines()
+    else:
+        with open(filename, "rb") as raw_file:
+            lines = raw_file.readlines()
+    data = []
+    error_count = 0
+    for line in lines:
         try:
-            resp = get(url=url, params=params, headers=headers, timeout=timeout)
-            logger.info(resp.url)
-            return resp
-        except reqErr.Timeout or reqErr.ReadTimeout or reqErr.ConnectTimeout or TimeoutError:
-            logging.error(f"Timeout error - {attempt+1}/{max_retries} timed out")
-        except reqErr.MissingSchema:
-            logging.error("Missing URL schema returning")
-            break
-        except Exception as e:
-            logging.error(f"Unknown error - {attempt+1}/{max_retries}\n{e}")
-            break
-        finally:
-            if (attempt+1) < max_retries:
-                sleep(1)
-    return {}
+            json_obj = json.loads(line)
+            try:
+                obj = decode_shodan(obj=json_obj)
+                data.append(obj)
+            except Exception as e:
+                logger.warning(f"JSON data could not be parsed")
+                logger.warning(e)
+        except:
+            error_count += 1
+            continue
+    if error_count > 0:
+        logging.error(f"{filename} - Errors occurred during loading of data: {error_count}")
+    return data
 
 
 if __name__ == "__main__":

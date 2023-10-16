@@ -2,7 +2,8 @@
     "global": {
         "request_page_size":    100,
         "request_max_retries":  3,
-        "request_timeout":      3
+        "request_timeout":      3,
+        "C99api": ""
     },
 
     "logging": {

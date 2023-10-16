@@ -1,3 +1,6 @@
 *.egg-info
 __pycache__
-config/config.override.json
+config.override.json
+*.xlsx
+/data/*.json
+/data/*.json.gz

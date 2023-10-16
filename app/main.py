@@ -2,32 +2,26 @@
 # coding: utf-8
 
 import logging
-from typing import List, Dict, Optional
-import json
 import click
-from os.path import exists
 
-from pydantic import BaseModel, ValidationError
+import pandas as pd
+from typing import List, Dict, Optional
+from os.path import isdir, isfile
+from os import walk
 
-from ShodanExtractor.common import load_config, load_shodan_files, extract_common_keys
-from ShodanExtractor import ShodanObject
-
-from zipfile import ZipFile
-import gzip
-
-
-
+from ShodanExtractor.common import load_config, load_shodan_files, enrich_object_c99
 
 
 @click.command("main")
-@click.option("--shodan-file", "-f", multiple=True, help="Pass a key to specify that key from the results")
-@click.option("--enable-c99", is_flag=True, show_default=True, default=False, help="Enable c99nl scan for expanding on metadata information")
-@click.option("--enable-whois", is_flag=True, show_default=True, default=False, help="Enable WHOIS lookup for expanding on metadata information")
-@click.option("--enable-vt", is_flag=True, show_default=True, default=False, help="Enable VirusTotal lookup for expanding on metadata information")
+@click.option("-f", "--files", multiple=True, help="Shodan JSON file, compressed or uncompressed", type=click.Path(exists=True, readable=True))
+@click.option("-o", "--output-dir", multiple=False, help="", type=click.Path(exists=True, writable=True), default="./")
+@click.option("--enable-c99", is_flag=True, default=False, help="Enable c99nl scan for expanding on metadata information")
+@click.option("--enable-whois", is_flag=True, default=False, help="Enable WHOIS lookup for expanding on metadata information")
+@click.option("--enable-vt", is_flag=True, default=False, help="Enable VirusTotal lookup for expanding on metadata information")
 @click.pass_context
-def main(ctx, enable_c99, enable_vt, enable_whois, shodan_file):
-    config = load_config(default_config="../config/config.default.json",
-                         override_config="../config/config.override.json")
+def main(ctx, enable_c99:bool=False, enable_whois:bool=False, enable_vt:bool=False, files:List=[], output_dir:str="./"):
+    config = load_config(default_config="config.default.json", override_config="config.override.json")
+
     logConfig = config["logging"]
     logging.basicConfig(
         level=logConfig["log_level"],
@@ -35,18 +29,36 @@ def main(ctx, enable_c99, enable_vt, enable_whois, shodan_file):
         datefmt=logConfig["log_date_formt"]
     )
 
-    json_objects = load_shodan_files(filenamse=shodan_file)
-    
-    shodan_hashes = []
-    shodan_objects = []
-    while json_objects:
-        obj = json_objects.pop()
-        if obj["hash"] in shodan_hashes:
-            logging.warning(f"Skipped existing shodan object based on hash")
-            continue
-        shodan_object = ShodanObject.ShodanObject(data=obj, config=config)
-        shodan_objects.append(shodan_object)
+    logging.info(f"""MAIN
+enable_c99:   {enable_c99}
+enable_whois: {enable_whois}
+enable_vt:    {enable_vt}
+input_list:   {', '.join(files)}""")
 
+    filepaths = []
+    for filepath in files:
+        if isdir(filepath):
+            dir_listing = walk(filepath)
+            filepaths.extend([str(fpath) for fpath in dir_listing if isfile(str(fpath) and (filepath.endswith(".json.gz") or filepath.endswith(".json")))])
+        elif filepath.endswith(".json.gz") or filepath.endswith(".json"):
+            filepaths.append(filepath)
+    
+    shodan_data = []
+    for filepath in filepaths:
+        shodan_data.extend(load_shodan_files(filename=filepath, config=config))
+
+    if enable_c99 and config["global"]["C99api"]:
+        for shodan_object in shodan_data:
+            enrich_object_c99(shodan_object, c99_key=config["global"]["C99api"])
+        
+    df = pd.DataFrame(shodan_data)
+    print(df.head())
+    logging.info(f"Elements loaded: {len(shodan_data)}")
+    
+    output_dir = output_dir[":-1"] if output_dir.endswith("//") else output_dir
+    if isdir(output_dir):
+        df.to_excel(f"{output_dir}/shodan_export.xlsx")
+          
 
 if __name__ == "__main__":
     main()
