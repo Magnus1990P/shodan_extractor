@@ -62,29 +62,35 @@ def decode_shodan(obj:dict={}):
         parsed_object = {
             "domain_list": obj["domains"] if "domains" in obj else [],
             "hostname_list": [obj["_shodan"]["options"]["hostname"]] if "hostname" in obj["_shodan"]["options"] else [],
-            "cloud_provider": None,
-            "operating_system": obj["os"],
             "product": obj["product"] if "product" in obj else "",
-            "IPAddress": ipaddress.ip_address(obj["ip_str"]),
-            "timestamp": datetime.datetime.fromisoformat(obj["timestamp"]),
-            "protocol": obj["transport"] if "transport" in obj else "",
-            "internet_service_provider": obj["isp"],
             "version": obj["version"] if "version" in obj else "",
+            "operating_system": obj["os"],
+            "IPAddress": ipaddress.ip_address(obj["ip_str"]),
+            "scanned": datetime.datetime.fromisoformat(obj["timestamp"]),
+            "protocol": obj["transport"] if "transport" in obj else "",
+            "port": obj["port"],
+            "internet_service_provider": obj["isp"],
             "organisation": obj["org"],
             "country": obj["location"]["country_name"] if "country_name" in obj["location"] else "",
-            "city": obj["location"]["city"] if "city" in obj["location"] else "",
-            "port": obj["port"]
+            "city": obj["location"]["city"] if "city" in obj["location"] else ""
         }
         parsed_object["hostname_list"].extend([hname.strip() for hname in obj["hostnames"]])
+        parsed_object["hostname_list"] = ", ".join(list(set(parsed_object["hostname_list"]))) if parsed_object["hostname_list"] else None
+        parsed_object["domain_list"] = ", ".join(list(set(parsed_object["domain_list"]))) if parsed_object["domain_list"] else None
+        
     except Exception as e:
         logging.error(e)
         return {}
     try:
         if "ssl" in obj and "cert" in obj["ssl"]:
             cert = obj["ssl"]
-            #parsed_object["ssl_fingerprint"] = cert["cert"]["fingerprint"]["sha256"]
-            #parsed_object["ssl_serial"] = cert["cert"]["serial"]
-            parsed_object["ssl_SAN"] = [cert["cert"]["subject"]["CN"]] if "CN" in cert["cert"]["subject"]["CN"] else []
+            if "subject" in cert["cert"]:
+                if "CN" in cert["cert"]["subject"]:
+                    parsed_object["ssl_SAN"] = [cert["cert"]["subject"]["CN"]]
+                elif "unstructuredName" in cert["cert"]["subject"]:
+                    parsed_object["ssl_SAN"] = [cert["cert"]["subject"]["unstructuredName"]]
+                else:
+                    parsed_object["ssl_SAN"] = []
             for alt in cert["cert"]["extensions"]:
                 if alt["name"]=="subjectAltName" and alt["data"]:
                     i = 0
@@ -101,29 +107,44 @@ def decode_shodan(obj:dict={}):
                             i = len(alt["data"])
                         if parsed_object["ssl_SAN"][-1] == "0.":
                             parsed_object["ssl_SAN"].pop()
-            parsed_object["ssl_SAN"] = list(set(parsed_object["ssl_SAN"]))
-            parsed_object["ssl_issuer"] = cert["cert"]["issuer"]["O"] if "O" in cert["cert"]["issuer"] else cert["cert"]["issuer"]["CN"]
-            #parsed_object["ssl_ja3"] = cert["ja3s"]
-            #parsed_object["ssl_jarm"] = cert["jarm"]
-            parsed_object["ssl_expiration"] = datetime.datetime.strptime(cert["cert"]["expires"], "%Y%m%d%H%M%SZ")
-        else:
-            #parsed_object["ssl_fingerprint"] = ""
-            #parsed_object["ssl_serial"] = -1
-            parsed_object["ssl_SAN"] = []
-            parsed_object["ssl_issuer"] = ""
-            #parsed_object["ssl_ja3"] = ""
-            #parsed_object["ssl_jarm"] = ""
-            parsed_object["ssl_expiration"] = datetime.datetime.fromordinal(1)
+            parsed_object["ssl_SAN"] = ", ".join(list(set(parsed_object["ssl_SAN"]))) if parsed_object["ssl_SAN"] else None
+            if "issuer" in cert["cert"]:
+                if "O" in cert["cert"]["issuer"]:
+                    parsed_object["ssl_issuer"] = cert["cert"]["issuer"]["O"]
+                elif "CN" in cert["cert"]["issuer"]:
+                    parsed_object["ssl_issuer"] = cert["cert"]["issuer"]["CN"]
+                elif "unstructuredName" in cert["cert"]["issuer"]:
+                    parsed_object["ssl_issuer"] = cert["cert"]["issuer"]["unstructuredName"]
+                else:
+                    print("ISSUER:",cert["cert"]["issuer"])
+            parsed_object["ssl_fingerprint"] = cert["cert"]["fingerprint"]["sha256"]
+            parsed_object["ssl_serial"] = cert["cert"]["serial"]
+            parsed_object["ssl_ja3"] = cert["ja3s"]
+            parsed_object["ssl_jarm"] = cert["jarm"]
     except Exception as e:
-        #parsed_object["ssl_fingerprint"] = ""
-        #parsed_object["ssl_serial"] = -1
-        parsed_object["ssl_SAN"] = []
-        parsed_object["ssl_issuer"] = ""
-        #parsed_object["ssl_ja3"] = ""
-        #parsed_object["ssl_jarm"] = ""
-        parsed_object["ssl_expiration"] = datetime.datetime.fromordinal(1)
         logging.error(e)
     return parsed_object
+
+
+def dict_explode(d, rem_keys, row):
+    if rem_keys==[]:
+        temp = row.copy()
+        return [temp]
+    key = rem_keys[0]
+    rows = []
+
+    if isinstance(d[key], (list,)):
+        if d[key] == None or len(d[key]) == 0:
+            row[key] = d[key]
+            rows.extend(dict_explode(d, rem_keys[1:], row))
+        else:
+            for val in d[key]:
+                row[key] = val
+                rows.extend(dict_explode(d, rem_keys[1:], row))
+    else:
+        row[key] = d[key]
+        rows.extend(dict_explode(d, rem_keys[1:], row))
+    return rows
 
 
 def load_shodan_files(filename:str="", config:Dict={}):
@@ -146,7 +167,6 @@ def load_shodan_files(filename:str="", config:Dict={}):
                 obj = decode_shodan(obj=json_obj)
                 data.append(obj)
             except Exception as e:
-                logger.warning(f"JSON data could not be parsed")
                 logger.warning(e)
         except:
             error_count += 1

@@ -38,26 +38,26 @@ input_list:   {', '.join(files)}""")
     filepaths = []
     for filepath in files:
         if isdir(filepath):
-            dir_listing = walk(filepath)
-            filepaths.extend([str(fpath) for fpath in dir_listing if isfile(str(fpath) and (filepath.endswith(".json.gz") or filepath.endswith(".json")))])
+            for root, dirlist, filelist in walk(filepath):
+                filepaths.extend([f"{root}/{fname}" for fname in filelist if fname.endswith(".json.gz") or fname.endswith(".json")])
         elif filepath.endswith(".json.gz") or filepath.endswith(".json"):
             filepaths.append(filepath)
     
     shodan_data = []
     for filepath in filepaths:
+        print(filepath)
         shodan_data.extend(load_shodan_files(filename=filepath, config=config))
-
+    
     if enable_c99 and config["global"]["C99api"]:
         for shodan_object in shodan_data:
             enrich_object_c99(shodan_object, c99_key=config["global"]["C99api"])
         
     df = pd.DataFrame(shodan_data)
-    print(df.head())
     logging.info(f"Elements loaded: {len(shodan_data)}")
     
     output_dir = output_dir[":-1"] if output_dir.endswith("//") else output_dir
     if isdir(output_dir):
-        df.to_excel(f"{output_dir}/shodan_export.xlsx")
+        df.to_excel(f"{output_dir}/shodan_export.xlsx", index=False)
           
 
 if __name__ == "__main__":
