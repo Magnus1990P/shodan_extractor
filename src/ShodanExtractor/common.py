@@ -3,12 +3,10 @@ import json
 import gzip
 import ipaddress
 import datetime
-
 from c99api import EndpointClient
 from typing import List, Dict, Optional
 from os.path import exists
 
-from pydantic import BaseModel
 
 logger = logging.getLogger()
 
@@ -25,6 +23,7 @@ def enrich_object_c99(object, c99_key:str=""):
     if resp["success"] and resp["count"] >= 1:
         logging.info(f"ip2domains: {resp['data']}")
         object["domain_list"].extend([hname for hname in resp["data"] if hname not in object["domain_list"]])
+
 
 def merge_config(current_config: Dict[int, str] = {}, custom_config: Dict[int, str] = {}):
     for key, value in custom_config.items():
@@ -185,4 +184,3 @@ if __name__ == "__main__":
         format=logConfig["log_fstr_std"],
         datefmt=logConfig["log_date_formt"]
     )
-    pass

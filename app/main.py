@@ -3,12 +3,10 @@
 
 import logging
 import click
-
 import pandas as pd
 from typing import List, Dict, Optional
 from os.path import isdir, isfile
 from os import walk
-
 from ShodanExtractor.common import load_config, load_shodan_files, enrich_object_c99
 
 
@@ -58,7 +56,7 @@ input_list:   {', '.join(files)}""")
     output_dir = output_dir[":-1"] if output_dir.endswith("//") else output_dir
     if isdir(output_dir):
         df.to_excel(f"{output_dir}/shodan_export.xlsx", index=False)
-          
+
 
 if __name__ == "__main__":
     main()

@@ -4,5 +4,8 @@ pytest
 pytest-cov
 mypy
 click
-pyopenssl
-pydantic
+pandas
+requests
+openpyxl
+c99api
+ipaddress
