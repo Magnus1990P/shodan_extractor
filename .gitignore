@@ -2,5 +2,8 @@
 __pycache__
 config.override.json
 *.xlsx
+ips.txt
 /data/*.json
 /data/*.json.gz
+/venv
+*.xlsx#

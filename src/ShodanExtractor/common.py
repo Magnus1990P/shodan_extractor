@@ -6,9 +6,39 @@ import datetime
 from c99api import EndpointClient
 from typing import List, Dict, Optional
 from os.path import exists
-
+import ipaddress
 
 logger = logging.getLogger()
+
+
+def tag_known_ips(object, known_ips:list[ipaddress.IPv4Address | ipaddress.IPv6Address]):
+    if object["IPAddress"] in known_ips:
+        object["known_ip"] = True
+        print("FOUND", object["IPAddress"])
+    else:
+        object["known_ip"] = False
+
+
+def load_ips(filepath:str):
+    try:
+        ip_list = []
+        with open(filepath, "r") as ip_fh:
+            for ip_addr_str in ip_fh.readlines():
+                ip_addr_str = ip_addr_str.strip()
+                if not ip_addr_str:
+                    continue
+                try:
+                    if("/") in ip_addr_str:
+                        ip_addr = ipaddress.ip_network(ip_addr_str)
+                        ip_list.extend(ip_addr.hosts())
+                    else:
+                        ip_list.append(ipaddress.ip_address(ip_addr_str))
+                except:
+                    continue
+        return list(set(ip_list))
+    except:
+        print("Could not read file")
+    return []
 
 
 def enrich_object_c99(object, c99_key:str=""):
