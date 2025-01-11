@@ -10,6 +10,27 @@ from os import walk
 from ShodanExtractor.common import load_config, load_shodan_files, enrich_object_c99, load_ips, tag_known_ips
 
 
+print_columns = ["known_ip",
+            "organisation", 
+            "domain_list",
+            "hostname_list",
+            "ssl_SAN", 
+            "IPAddress",
+            #"protocol",
+            "port",
+            "product",
+            #"operating_system",
+            #"version",
+            #"country", 
+            "city", 
+            "ssl_issuer"#, 
+            #"ssl_fingerprint", 
+            #"ssl_serial", 
+            #"ssl_ja3", 
+            #"ssl_jarm",
+            #"scanned"
+        ]
+
 @click.command("main")
 @click.option("-f", "--files", multiple=True, help="Shodan JSON file, compressed or uncompressed", type=click.Path(exists=True, readable=True))
 @click.option("-iL", "--ip-list", multiple=False, help="File containing a list of IP in CIDR or IP notation", type=click.Path(exists=True, readable=True), default="../data/ips.txt", required=False)
@@ -57,11 +78,13 @@ input_list:   {', '.join(files)}""")
             enrich_object_c99(shodan_object, c99_key=config["global"]["C99api"])
         
     df = pd.DataFrame(shodan_data)
-    logging.info(f"Elements loaded: {len(shodan_data)}")
-    
+    logging.info(f"Elements loaded: {len(df)}")
+    df_unique = df.drop_duplicates()
+    logging.info(f"Elements after cleanup: {len(df_unique)}")
+
     output_dir = output_dir[":-1"] if output_dir.endswith("//") else output_dir
     if isdir(output_dir):
-        df.to_excel(f"{output_dir}/shodan_export.xlsx", index=False)
+        df_unique[print_columns].to_excel(f"{output_dir}/shodan_export.xlsx", index=False)
 
 
 if __name__ == "__main__":
